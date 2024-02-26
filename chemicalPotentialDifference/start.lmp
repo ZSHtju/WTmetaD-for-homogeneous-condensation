@@ -1,0 +1,65 @@
+####vapor-liquid co-exist modelling with OPC water model
+
+variable temperature equal 373  # Set molecule temp
+variable dump_out_freq equal 10000
+variable restart_out_freq equal 100
+variable seed equal 18547
+
+log		log.lammps append ## the name of the output log file
+units	metal  ## metal units. See LAMMPS documentation
+dimension	3 ## 3D geometry
+boundary	p	p	p ## Periodic boundary condition in all 3-dimensions
+atom_style	full
+neighbor 2.0 bin ##  2 Angstrom skin distance
+neigh_modify    delay 0 every 1 check yes one 11330 page 200000 ## How often neighboring list is modified
+read_data  lammps.data ## Read the data file
+
+
+########################################## INTERACTION PARAMETERS #########################################
+##Set atom charge
+set type 1 charge -1.358200 # charge of O
+set type 2 charge 0.679100  # charge of H
+
+##### Bond and angle parameters
+bond_style               harmonic
+bond_coeff               1  21.7   0.8724
+angle_style              harmonic
+angle_coeff              1  2.17   103.6
+
+##### Pair coefficients
+pair_style   lj/cut/tip4p/long 1 2 1 1 0.159400 12.5 12.0
+pair_modify     tail yes
+kspace_style    pppm/tip4p 1.0e-6 ##### Long-range interaction using PPPM
+pair_coeff  1 1  0.00922777 3.166550 # O-O
+pair_coeff  * 2  0 0 # O-H H-H
+
+#Shake
+fix SHAKE all shake 1e-6 500 0 b 1 a 1 ##### Use of SHAKE algorithm for water to be rigid
+########################################## COMPUTE PARAMETERS #############################################
+
+##### Output log file
+thermo_style          custom step temp pe ke etotal 
+thermo                100 ######## Output every 100 time steps
+thermo_modify         flush yes ######## Make sure output is updated and not buffered if LAMMPS stops before completion
+timestep              0.001 
+
+##### Velocities randomly generated for a specified temperature
+velocity all create ${temperature} ${seed} dist gaussian
+fix             1 all nvt temp ${temperature} ${temperature} $(dt*100)
+run 100000 # pre-equilibration
+write_restart restart.equil
+
+unfix 1
+reset_timestep  0
+
+fix		1 all nvt temp ${temperature} ${temperature} $(dt*100)
+fix     2 all plumed plumedfile plumed.dat outfile p.log
+
+##### Output trajectory files
+dump            1 all custom ${dump_out_freq} dump.atom id mol type x y z vx vy vz
+dump_modify     1 append yes
+
+restart 	${restart_out_freq} restart.lmp restart2.lmp
+run 100000000 upto # 100 ns, should be adjusted according to the free energy profile convergence
+
+write_data	data.final
